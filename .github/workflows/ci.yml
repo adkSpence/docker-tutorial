@@ -1,0 +1,81 @@
+# The name shown in GitHub's Actions tab
+name: Build, Test, and Push
+
+# TRIGGER: when does this pipeline run?
+# We run on every push to main, and on every pull request targeting main.
+# PRs run build+test but NOT push (we only publish from main).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # ─── JOB 1: Build the image and run tests ───────────────────────────────────
+  build-and-test:
+    # The runner: a fresh Ubuntu VM provided by GitHub for free
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out your code onto the runner VM
+      # Without this, the VM has no idea what your repo contains
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Build the Docker image
+      # This is exactly the command you ran locally — same Dockerfile, same logic
+      # We tag it "myapp:test" — a temporary tag just for this pipeline run
+      - name: Build Docker image
+        run: docker build -t myapp:test .
+
+      # Step 3: Run tests inside the container
+      # We spin up a container from the image we just built and run pytest inside it
+      # This proves the app works *inside the container*, not just on your laptop
+      - name: Run tests
+        run: docker run --rm myapp:test python -m pytest tests/ -v
+
+  # ─── JOB 2: Push to registry ────────────────────────────────────────────────
+  push-to-registry:
+    # This job only runs after build-and-test passes
+    # If tests fail, this job never runs — nothing broken gets published
+    needs: build-and-test
+
+    # Only push on actual commits to main — not on pull requests
+    # PRs should verify the build works, but shouldn't publish images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    # Permissions needed to push to GitHub Container Registry (ghcr.io)
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step: Log in to GitHub Container Registry
+      # ghcr.io is GitHub's built-in registry — no separate account needed
+      # GITHUB_TOKEN is a secret GitHub injects automatically into every pipeline run
+      # You never have to create or rotate it
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step: Build and push the image with proper tags
+      # We tag with two tags:
+      #   :latest        — always points to the most recent main build
+      #   :<commit-sha>  — an immutable tag for this exact commit (good for rollbacks)
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/myapp:latest
+            ghcr.io/${{ github.repository_owner }}/myapp:${{ github.sha }}
