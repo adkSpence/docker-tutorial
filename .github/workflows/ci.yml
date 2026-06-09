@@ -56,6 +56,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Normalize the owner name to lowercase — Docker registry names must be lowercase
+      # github.repository_owner preserves the original casing (e.g. "adkSpence")
+      # We write the lowercased value into GITHUB_ENV so later steps can use it
+      - name: Set lowercase owner
+        run: echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       # Step: Log in to GitHub Container Registry
       # ghcr.io is GitHub's built-in registry — no separate account needed
       # GITHUB_TOKEN is a secret GitHub injects automatically into every pipeline run
@@ -77,5 +83,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/myapp:latest
-            ghcr.io/${{ github.repository_owner }}/myapp:${{ github.sha }}
+            ghcr.io/${{ env.OWNER }}/myapp:latest
+            ghcr.io/${{ env.OWNER }}/myapp:${{ github.sha }}
